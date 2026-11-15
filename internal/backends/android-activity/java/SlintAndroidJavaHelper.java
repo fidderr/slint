@@ -1425,6 +1425,11 @@ public class SlintAndroidJavaHelper {
         mActivity.runOnUiThread(mInputView::clearTextInputClient);
     }
 
+    // The name of the application, as its manifest labels it.
+    public String application_label() {
+        return mActivity.getApplicationInfo().loadLabel(mActivity.getPackageManager()).toString();
+    }
+
     public String get_clipboard() {
         FutureTask<String> future = new FutureTask<>(() -> {
             ClipData clip = mActivity.getSystemService(ClipboardManager.class).getPrimaryClip();
