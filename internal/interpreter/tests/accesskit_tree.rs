@@ -202,6 +202,190 @@ fn an_explicit_title_names_the_root_node() {
     assert_eq!(root_label(titled).as_deref(), Some("Mine"));
 }
 
+const POPUP_SOURCE: &str = r#"
+export component TestCase inherits Window {
+    width: 400px;
+    height: 300px;
+
+    public function open-popup() { popup.show(); }
+    public function close-popup() { popup.close(); }
+    public function open-quiet-popup() { quiet.show(); }
+
+    Rectangle {
+        accessible-role: button;
+        accessible-label: "Background";
+    }
+
+    opener := Rectangle {
+        accessible-role: button;
+        accessible-label: "Opener";
+        height: 20px;
+        y: 0px;
+
+        popup := PopupWindow {
+            x: 0px;
+            y: 30px;
+            width: 100px;
+            height: 50px;
+            Rectangle {
+                accessible-role: button;
+                accessible-label: "In the popup";
+            }
+        }
+    }
+
+    Rectangle {
+        accessible-role: button;
+        accessible-label: "Beside";
+        y: 100px;
+    }
+
+    quiet := PopupWindow {
+        close-policy: no-auto-close;
+        Rectangle {
+            accessible-role: button;
+            accessible-label: "In the quiet popup";
+        }
+    }
+}
+"#;
+
+fn hidden_labels(update: &TreeUpdate) -> Vec<String> {
+    let mut labels: Vec<String> = update
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.is_hidden())
+        .filter_map(|(_, node)| node.label().map(str::to_string))
+        .collect();
+    labels.sort();
+    labels
+}
+
+#[test]
+fn an_open_popup_hides_the_rest_of_the_window() {
+    let mut f = Fixture::with_source(POPUP_SOURCE);
+    assert!(hidden_labels(&f.tree.build_new_tree()).is_empty());
+
+    f.instance.invoke("open-popup", &[]).unwrap();
+    let update = f.tree.build_new_tree();
+    // What is not in reach of the popup is hidden, and so is the rest of the window: the popup
+    // blocks input to it. The button that opened the popup is what the popup is a child of.
+    let hidden = hidden_labels(&update);
+    assert_eq!(hidden, ["Background", "Beside"], "{hidden:?}");
+    assert!(!node_by_label(&update, "In the popup").1.is_hidden());
+    assert!(!node_by_label(&update, "Opener").1.is_hidden());
+
+    f.instance.invoke("close-popup", &[]).unwrap();
+    assert!(hidden_labels(&f.tree.build_new_tree()).is_empty());
+}
+
+#[test]
+fn a_popup_that_does_not_close_itself_blocks_input_too() {
+    let mut f = Fixture::with_source(POPUP_SOURCE);
+    f.instance.invoke("open-quiet-popup", &[]).unwrap();
+    // Input to the rest of the window is blocked here too
+    let hidden = hidden_labels(&f.tree.build_new_tree());
+    assert_eq!(hidden, ["Background", "Beside", "Opener"], "{hidden:?}");
+}
+
+const MODAL_SOURCE: &str = r#"
+export component TestCase inherits Window {
+    width: 400px;
+    height: 300px;
+
+    in-out property <bool> sheet-open: false;
+    in-out property <bool> sheet-shown: true;
+
+    // Painted first, so below everything that follows
+    VerticalLayout {
+        Rectangle {
+            accessible-role: button;
+            accessible-label: "Background";
+        }
+    }
+
+    Rectangle {
+        accessible-role: button;
+        accessible-label: "Also behind";
+    }
+
+    Rectangle {
+        accessible-role: region;
+        accessible-label: "Sheet";
+        accessible-modal: root.sheet-open;
+        visible: root.sheet-shown;
+
+        Rectangle {
+            accessible-role: button;
+            accessible-label: "In the sheet";
+        }
+    }
+
+    Rectangle {
+        accessible-role: button;
+        accessible-label: "In front";
+    }
+}
+"#;
+
+fn is_hidden(f: &mut Fixture, label: &str) -> bool {
+    let update = f.tree.build_new_tree();
+    node_by_label(&update, label).1.is_hidden()
+}
+
+#[test]
+fn a_modal_item_hides_what_is_behind_it() {
+    let mut f = Fixture::with_source(MODAL_SOURCE);
+    // Nothing is hidden while the sheet is closed
+    let update = f.tree.build_new_tree();
+    for label in ["Background", "Also behind", "Sheet", "In the sheet", "In front"] {
+        assert!(!node_by_label(&update, label).1.is_hidden(), "{label} is hidden");
+    }
+    assert!(!node_by_label(&update, "Sheet").1.is_modal());
+
+    f.instance.set_property("sheet-open", Value::Bool(true)).unwrap();
+    let update = f.tree.build_new_tree();
+    assert!(node_by_label(&update, "Sheet").1.is_modal());
+    // The content below the sheet is out of reach, also in a layout, and so is nothing else
+    for label in ["Background", "Also behind"] {
+        assert!(node_by_label(&update, label).1.is_hidden(), "{label} is not hidden");
+    }
+    for label in ["Sheet", "In the sheet", "In front"] {
+        assert!(!node_by_label(&update, label).1.is_hidden(), "{label} is hidden");
+    }
+
+    f.instance.set_property("sheet-open", Value::Bool(false)).unwrap();
+    assert!(!is_hidden(&mut f, "Background"));
+}
+
+#[test]
+fn a_changing_modal_item_updates_the_nodes_behind_it() {
+    let mut f = Fixture::with_source(MODAL_SOURCE);
+    let first = f.tree.build_new_tree();
+    let (background, _) = node_by_label(&first, "Background");
+    let (front, _) = node_by_label(&first, "In front");
+
+    f.instance.set_property("sheet-open", Value::Bool(true)).unwrap();
+    let update = f.tree.rebuild_dirty_nodes();
+    let hidden =
+        |id: NodeId| update.nodes.iter().find(|(i, _)| *i == id).map(|(_, n)| n.is_hidden());
+    assert_eq!(hidden(background), Some(true), "the background is rebuilt as hidden");
+    assert_eq!(hidden(front), None, "what is in front is not rebuilt");
+
+    f.instance.set_property("sheet-open", Value::Bool(false)).unwrap();
+    let update = f.tree.rebuild_dirty_nodes();
+    let node = update.nodes.iter().find(|(i, _)| *i == background).unwrap();
+    assert!(!node.1.is_hidden(), "the background is back");
+}
+
+#[test]
+fn an_invisible_modal_item_hides_nothing() {
+    let mut f = Fixture::with_source(MODAL_SOURCE);
+    f.instance.set_property("sheet-open", Value::Bool(true)).unwrap();
+    f.instance.set_property("sheet-shown", Value::Bool(false)).unwrap();
+    assert!(!is_hidden(&mut f, "Background"));
+}
+
 #[test]
 fn node_bounds_are_physical_pixels() {
     let mut f = Fixture::new();
