@@ -506,7 +506,7 @@ Common causes:
 
 Slint exposes the elements of your user interface to Android accessibility services such as TalkBack, Switch Access and UI Automator.
 TalkBack reads the label, role and state of the elements, and moves the focus between them with swipes.
-Accessibility services can also activate buttons and check boxes, change the value of sliders, and move the selection in text fields.
+Accessibility services can also activate buttons and check boxes, change the value of sliders, move the selection in text fields, and scroll a `ListView` or another element that contains a `Flickable`.
 
 In Rust, this is the `accessibility` feature of the `slint` crate.
 It is part of the default features, so it is on unless you turned the default features off.
