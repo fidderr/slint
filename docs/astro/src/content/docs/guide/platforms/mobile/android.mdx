@@ -2,7 +2,7 @@
 title: Android
 description: Android Platform Guide
 ---
-{/* cSpell: ignore xbuild textfields abifilters gradlew logcat armeabi androideabi myproject libapp */}
+{/* cSpell: ignore xbuild textfields abifilters gradlew logcat armeabi androideabi myproject libapp talkback uiautomator automator sdcard */}
 
 import LangRefLink from '@slint/common-files/src/components/LangRefLink.astro';
 import Link from '@slint/common-files/src/components/Link.astro';
@@ -501,3 +501,41 @@ Common causes:
 
 </TabItem>
 </Tabs>
+
+## Accessibility
+
+Slint exposes the elements of your user interface to Android accessibility services such as TalkBack, Switch Access and UI Automator.
+TalkBack reads the label, role and state of the elements, and moves the focus between them with swipes.
+Accessibility services can also activate buttons and check boxes, change the value of sliders, and move the selection in text fields.
+
+In Rust, this is the `accessibility` feature of the `slint` crate.
+It is part of the default features, so it is on unless you turned the default features off.
+If you did, enable it again:
+
+```toml
+[dependencies]
+slint = { version = "1", default-features = false, features = ["accessibility", "backend-android-activity-06"] }
+```
+
+The feature adds a small amount of code to your application, and nothing runs until an accessibility service is enabled on the device.
+Use the `accessible-role` and `accessible-label` properties of your elements to describe them, as on the other platforms.
+
+### Testing
+
+To try it with TalkBack, enable it in **Settings → Accessibility → TalkBack**.
+Devices and emulators without Google Play services may not ship TalkBack.
+
+You can also check what an accessibility service sees without TalkBack.
+With the app running, dump the accessibility tree of the screen:
+
+```sh
+adb shell uiautomator dump /sdcard/ui.xml
+adb pull /sdcard/ui.xml
+```
+
+Every Slint element with an accessible role is a node in `ui.xml`, with its text, class, bounds and state such as `checked`.
+`adb logcat -s RustStdoutStderr` shows errors reported while setting up accessibility.
+
+### Limitations
+
+- Setting the text of a text field through an accessibility service (`ACTION_SET_TEXT`) isn't supported yet, because the AccessKit Android adapter doesn't support it.
