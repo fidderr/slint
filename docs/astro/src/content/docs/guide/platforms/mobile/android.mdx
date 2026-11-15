@@ -536,6 +536,14 @@ adb pull /sdcard/ui.xml
 Every Slint element with an accessible role is a node in `ui.xml`, with its text, class, bounds and state such as `checked`.
 `adb logcat -s RustStdoutStderr` shows errors reported while setting up accessibility.
 
+### Focus Indicator
+
+TalkBack and other accessibility services highlight the element that has accessibility focus with a frame.
+A GameActivity renders into a view of the window, so Android draws this frame itself.
+A NativeActivity renders to the surface of the activity window, so Android can't draw there.
+Slint then draws the frame in a window of its own, with the colour and stroke width from the accessibility settings of Android 15 and later, and the default green frame before that.
+Use a GameActivity if you want the frame that Android draws.
+
 ### Limitations
 
 - Setting the text of a text field through an accessibility service (`ACTION_SET_TEXT`) isn't supported yet, because the AccessKit Android adapter doesn't support it.
