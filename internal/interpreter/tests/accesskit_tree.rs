@@ -313,6 +313,156 @@ fn a_popup_that_does_not_close_itself_blocks_input_too() {
     assert_eq!(hidden, ["Background", "Beside", "Opener"], "{hidden:?}");
 }
 
+const MODAL_SOURCE: &str = r#"
+export component TestCase inherits Window {
+    width: 400px;
+    height: 300px;
+
+    in-out property <bool> sheet-open: false;
+    in-out property <bool> sheet-shown: true;
+
+    // Painted first, so below everything that follows
+    VerticalLayout {
+        Rectangle {
+            accessible-role: button;
+            accessible-label: "Background";
+        }
+    }
+
+    Rectangle {
+        accessible-role: button;
+        accessible-label: "Also behind";
+    }
+
+    Rectangle {
+        accessible-role: region;
+        accessible-label: "Sheet";
+        accessible-modal: root.sheet-open;
+        visible: root.sheet-shown;
+
+        Rectangle {
+            accessible-role: button;
+            accessible-label: "In the sheet";
+        }
+    }
+
+    Rectangle {
+        accessible-role: button;
+        accessible-label: "In front";
+    }
+}
+"#;
+
+fn is_hidden(update: &TreeUpdate, label: &str) -> bool {
+    node_by_label(update, label).1.is_hidden()
+}
+
+#[test]
+fn a_modal_item_hides_what_is_behind_it() {
+    let mut f = Fixture::with_source(MODAL_SOURCE);
+    // Nothing is hidden while the sheet is closed
+    let update = f.tree.build_new_tree();
+    for label in ["Background", "Also behind", "Sheet", "In the sheet", "In front"] {
+        assert!(!is_hidden(&update, label), "{label} is hidden");
+    }
+    assert!(!node_by_label(&update, "Sheet").1.is_modal());
+
+    f.instance.set_property("sheet-open", Value::Bool(true)).unwrap();
+    let update = f.tree.build_new_tree();
+    assert!(node_by_label(&update, "Sheet").1.is_modal());
+    // The content below the sheet is out of reach, also in a layout, and so is nothing else
+    for label in ["Background", "Also behind"] {
+        assert!(is_hidden(&update, label), "{label} is not hidden");
+    }
+    for label in ["Sheet", "In the sheet", "In front"] {
+        assert!(!is_hidden(&update, label), "{label} is hidden");
+    }
+
+    f.instance.set_property("sheet-open", Value::Bool(false)).unwrap();
+    assert!(!is_hidden(&f.tree.build_new_tree(), "Background"));
+}
+
+const CONDITIONAL_MODAL_SOURCE: &str = r#"
+export component TestCase inherits Window {
+    width: 400px;
+    height: 300px;
+
+    in-out property <bool> cond: false;
+
+    VerticalLayout {
+        Rectangle {
+            accessible-role: button;
+            accessible-label: "Background";
+        }
+    }
+
+    Rectangle {
+        accessible-role: region;
+        accessible-label: "Container";
+        Rectangle {
+            accessible-role: button;
+            accessible-label: "In the container";
+        }
+    }
+
+    if root.cond: Rectangle {
+        accessible-role: region;
+        accessible-label: "Sheet";
+        accessible-modal: true;
+    }
+
+    Rectangle {
+        accessible-role: button;
+        accessible-label: "In front";
+    }
+}
+"#;
+
+#[test]
+fn a_modal_item_from_an_if_hides_what_is_behind_it() {
+    let mut f = Fixture::with_source(CONDITIONAL_MODAL_SOURCE);
+    assert!(!is_hidden(&f.tree.build_new_tree(), "Background"));
+
+    f.instance.set_property("cond", Value::Bool(true)).unwrap();
+    let update = f.tree.build_new_tree();
+    assert!(is_hidden(&update, "Background"));
+    assert!(is_hidden(&update, "Container"));
+    assert!(is_hidden(&update, "In the container"));
+    assert!(node_by_label(&update, "Sheet").1.is_modal());
+    assert!(!is_hidden(&update, "In front"));
+
+    f.instance.set_property("cond", Value::Bool(false)).unwrap();
+    assert!(!is_hidden(&f.tree.build_new_tree(), "Background"));
+}
+
+#[test]
+fn a_changing_modal_item_updates_the_nodes_behind_it() {
+    let mut f = Fixture::with_source(MODAL_SOURCE);
+    let first = f.tree.build_new_tree();
+    let (background, _) = node_by_label(&first, "Background");
+    let (front, _) = node_by_label(&first, "In front");
+
+    f.instance.set_property("sheet-open", Value::Bool(true)).unwrap();
+    let update = f.tree.rebuild_dirty_nodes();
+    let hidden =
+        |id: NodeId| update.nodes.iter().find(|(i, _)| *i == id).map(|(_, n)| n.is_hidden());
+    assert_eq!(hidden(background), Some(true), "the background is rebuilt as hidden");
+    assert_eq!(hidden(front), None, "what is in front is not rebuilt");
+
+    f.instance.set_property("sheet-open", Value::Bool(false)).unwrap();
+    let update = f.tree.rebuild_dirty_nodes();
+    let node = update.nodes.iter().find(|(i, _)| *i == background).unwrap();
+    assert!(!node.1.is_hidden(), "the background is back");
+}
+
+#[test]
+fn an_invisible_modal_item_hides_nothing() {
+    let mut f = Fixture::with_source(MODAL_SOURCE);
+    f.instance.set_property("sheet-open", Value::Bool(true)).unwrap();
+    f.instance.set_property("sheet-shown", Value::Bool(false)).unwrap();
+    assert!(!is_hidden(&f.tree.build_new_tree(), "Background"));
+}
+
 #[test]
 fn node_bounds_are_physical_pixels() {
     let mut f = Fixture::new();
