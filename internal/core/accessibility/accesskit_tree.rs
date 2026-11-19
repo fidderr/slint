@@ -37,11 +37,11 @@ use crate::accessibility::{
 };
 use crate::api::{LogicalPosition, Window};
 use crate::input::FocusReason;
-use crate::item_tree::{ItemTreeRc, ItemTreeRef, ItemTreeWeak};
+use crate::item_tree::{ItemTreeRc, ItemTreeRef, ItemTreeWeak, ParentItemTraversalMode};
 use crate::items::{Flickable, ItemRc, ScrollBehavior, WindowItem};
 use crate::lengths::{LogicalPoint, ScaleFactor};
 use crate::properties::PropertyTracker;
-use crate::window::{PopupWindowLocation, WindowAdapter, WindowInner};
+use crate::window::{PopupWindowLocation, WindowAdapter, WindowInner, WindowKind};
 
 /// What [`AccessKitTree`] needs from the backend that owns it.
 ///
@@ -204,6 +204,8 @@ pub struct AccessKitTree {
     >,
     /// Added to the bounds of every node, in physical pixels.
     physical_offset: (f64, f64),
+    /// The popups that the rest of the window is hidden for, while there are any.
+    modal_popups: Option<ModalPopups>,
 }
 
 impl AccessKitTree {
@@ -225,6 +227,7 @@ impl AccessKitTree {
             all_nodes: Default::default(),
             text_state: Default::default(),
             physical_offset: (0., 0.),
+            modal_popups: None,
         }
     }
 
@@ -363,7 +366,7 @@ impl AccessKitTree {
                             let mut node = self.build_node_without_children(
                                 &item,
                                 scale_factor,
-                                Default::default(),
+                                cached_node.window_position,
                             );
                             node.set_children(cached_node.children.clone());
 
@@ -373,7 +376,7 @@ impl AccessKitTree {
                                 &mut node,
                                 cached_node.id,
                                 scale_factor,
-                                Default::default(),
+                                cached_node.window_position,
                                 &mut emitted,
                                 &window_adapter,
                             );
@@ -567,7 +570,12 @@ impl AccessKitTree {
 
         // Only the regular descendants: every emit pushes the TextRun children again, and
         // `accesskit_consumer` rejects a child that appears twice.
-        self.all_nodes.push(CachedNode { id, children: descendant_children, tracker });
+        self.all_nodes.push(CachedNode {
+            id,
+            children: descendant_children,
+            window_position,
+            tracker,
+        });
 
         nodes.push((id, node));
         nodes.extend(text_run_nodes);
@@ -670,6 +678,8 @@ impl AccessKitTree {
             })
             .collect::<Vec<_>>();
 
+        self.modal_popups = modal_popups(window_inner, &root_item);
+
         self.all_nodes.clear();
         let mut nodes = Vec::new();
 
@@ -767,6 +777,26 @@ impl AccessKitTree {
         Some(DeferredAccessKitAction::ScrollTo(flickable_item, LogicalPosition::new(x, y)))
     }
 
+    /// Whether a popup is open that blocks input to `item`, and so keeps assistive technologies
+    /// away from it as well. The popups themselves, and what they open from, stay in reach.
+    fn is_blocked_by_popup(&self, item: &ItemRc) -> bool {
+        let Some(modal) = &self.modal_popups else { return false };
+        if modal.ancestors.contains(item) {
+            return false;
+        }
+        // Items of a `for` or `if` in a popup are in a repeated tree, so look through the parents.
+        let mut current = item.clone();
+        loop {
+            if modal.trees.iter().any(|tree| vtable::VRc::ptr_eq(tree, current.item_tree())) {
+                return false;
+            }
+            match current.parent_item(ParentItemTraversalMode::StopAtPopups) {
+                Some(parent) => current = parent,
+                None => return true,
+            }
+        }
+    }
+
     fn build_node_without_children(
         &self,
         item: &ItemRc,
@@ -853,7 +883,7 @@ impl AccessKitTree {
             node.set_disabled();
         }
 
-        if !item.is_visible() {
+        if !item.is_visible() || self.is_blocked_by_popup(item) {
             node.set_hidden();
         }
 
@@ -1060,6 +1090,8 @@ impl crate::properties::PropertyDirtyHandler for DelegateFocusPropertyTracker {
 struct CachedNode {
     id: NodeId,
     children: Vec<NodeId>,
+    /// The origin of the popup the item is in, or zero for an item of the main window.
+    window_position: LogicalPoint,
     tracker: Pin<Box<PropertyTracker>>,
 }
 
@@ -1088,6 +1120,39 @@ impl DeferredAccessKitAction {
             }
         }
     }
+}
+
+/// The popups that block input to the rest of the window, and the items to keep for them.
+struct ModalPopups {
+    /// The item trees of the popups.
+    trees: Vec<ItemTreeRc>,
+    /// The accessible items that the popups open from, and their ancestors: the popups are
+    /// their descendants in the accessibility tree.
+    ancestors: Vec<ItemRc>,
+}
+
+/// The popups that block input to the rest of the window, which is every popup but a tooltip,
+/// and a menu of a menu bar, as that stays in use while its menu is open.
+fn modal_popups(window: &WindowInner, root_item: &ItemRc) -> Option<ModalPopups> {
+    let mut modal = ModalPopups { trees: Vec::new(), ancestors: Vec::new() };
+    for popup in window.active_popups().iter() {
+        let PopupWindowLocation::ChildWindow(_) = popup.location else { continue };
+        let parent = popup.parent_item.upgrade();
+        let opened_from_menu_bar = parent.as_ref().is_some_and(|item| {
+            item.downcast::<crate::items::ContextMenu>()
+                .is_some_and(|menu| menu.as_pin_ref().is_menu_bar())
+        });
+        if matches!(popup.window_kind, WindowKind::ToolTip) || opened_from_menu_bar {
+            continue;
+        }
+        modal.trees.push(popup.component.clone());
+        let mut ancestor = Some(parent.map_or_else(|| root_item.clone(), nearest_accessible_item));
+        while let Some(item) = ancestor {
+            ancestor = item.parent_item(ParentItemTraversalMode::StopAtPopups);
+            modal.ancestors.push(item);
+        }
+    }
+    (!modal.trees.is_empty()).then_some(modal)
 }
 
 struct AccessiblePopup {
