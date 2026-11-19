@@ -324,6 +324,42 @@ fn node_ids_survive_a_rebuild() {
     assert_eq!(first.tree.as_ref().unwrap().root, second.tree.as_ref().unwrap().root);
 }
 
+const REPEATED_SOURCE: &str = r#"
+export component TestCase inherits Window {
+    width: 400px;
+    height: 300px;
+    in-out property <bool> show: true;
+
+    VerticalLayout {
+        if root.show: Rectangle {
+            height: 40px;
+            accessible-role: button;
+            accessible-label: "Shown";
+        }
+        Rectangle {
+            height: 40px;
+            accessible-role: button;
+            accessible-label: "Always";
+        }
+    }
+}
+"#;
+
+#[test]
+fn a_destroyed_component_does_not_hand_its_node_ids_to_the_next_one() {
+    let mut f = Fixture::with_source(REPEATED_SOURCE);
+    let first = node_by_label(&f.tree.build_new_tree(), "Shown").0;
+
+    f.instance.set_property("show", Value::Bool(false)).unwrap();
+    f.tree.build_new_tree();
+    f.instance.set_property("show", Value::Bool(true)).unwrap();
+    let second = node_by_label(&f.tree.build_new_tree(), "Shown").0;
+
+    // A screen reader that still holds the first id (its focus, say) must not find the new
+    // node under it.
+    assert_ne!(first, second);
+}
+
 #[test]
 fn changed_property_rebuilds_only_its_node() {
     let mut f = Fixture::new();
