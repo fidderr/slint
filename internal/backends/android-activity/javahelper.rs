@@ -136,7 +136,8 @@ bind_java_type! {
                 input_type: jint,
                 show_cursor_handles: jboolean,
                 new_client: jboolean,
-                update_editing_state: jboolean
+                update_editing_state: jboolean,
+                serial: jint
             ),
         },
         fn set_light_system_bars {
@@ -217,7 +218,9 @@ bind_java_type! {
                     cursor_position: jint,
                     anchor_position: jint,
                     preedit_start: jint,
-                    preedit_end: jint
+                    preedit_end: jint,
+                    serial: jint,
+                    text_edited: jint
             ) -> (),
             fn = callback_update_text,
         },
@@ -584,6 +587,13 @@ impl JavaHelper {
             if update_editing_state {
                 *last_known = Some(state.clone());
             }
+            // Every state that is sent has the next number; what the input method reports back carries the number
+            // of the state it was made on.
+            let serial = if update_editing_state {
+                PUSH_SERIAL.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+            } else {
+                PUSH_SERIAL.load(std::sync::atomic::Ordering::SeqCst)
+            };
             drop(last_known);
             let text = JString::new(env, text.as_str())?;
 
@@ -685,6 +695,7 @@ impl JavaHelper {
                 show_cursor_handles,
                 new_client,
                 update_editing_state,
+                serial,
             )?;
 
             Ok(())
@@ -865,6 +876,9 @@ impl JavaHelper {
     }
 }
 
+/// The number of the last state that was sent to the input view.
+static PUSH_SERIAL: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
 fn callback_update_text<'local>(
     _env: &mut Env<'local>,
     _class: JClass<'local>,
@@ -873,6 +887,8 @@ fn callback_update_text<'local>(
     anchor_position: jint,
     preedit_start: jint,
     preedit_end: jint,
+    serial: jint,
+    text_edited: jint,
 ) -> Result<(), jni::errors::Error> {
     let java_str = text.to_string();
     let decoded: std::borrow::Cow<str> = (&java_str).into();
@@ -890,6 +906,17 @@ fn callback_update_text<'local>(
 
     i_slint_core::api::invoke_from_event_loop(move || {
         if let Some(adaptor) = CURRENT_WINDOW.with_borrow(|x| x.upgrade()) {
+            // A report that only moves the selection or the composing region, and was made on a state older
+            // than the last one that was sent (or while an edit of the text input is still to be sent),
+            // describes a text and a cursor that the text input has left behind: applying it would undo
+            // what was typed or deleted since. The next state that is sent replaces what the input method
+            // did there as well. A report with an edit of the text is applied as before.
+            if text_edited == 0
+                && (serial < PUSH_SERIAL.load(std::sync::atomic::Ordering::SeqCst)
+                    || adaptor.has_pending_ime_update())
+            {
+                return;
+            }
             // Input methods also move the composing region when the user taps or selects, which
             // mustn't hide the handles.
             let previous = adaptor.java_helper.3.replace(Some(remote_state.clone()));
