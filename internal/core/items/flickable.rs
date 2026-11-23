@@ -139,10 +139,10 @@ impl Item for Flickable {
             // Binding that returns if the Flickable is out of bounds:
             |self_weak| {
                 let Some(flick_rc) = self_weak.upgrade() else {
-                    return (false, false, Default::default());
+                    return (false, false, Default::default(), false, false);
                 };
                 let Some(flick) = flick_rc.downcast::<Flickable>() else {
-                    return (false, false, Default::default());
+                    return (false, false, Default::default(), false, false);
                 };
                 let flick = flick.as_pin_ref();
                 let geo = Self::geometry_without_virtual_keyboard(&flick_rc);
@@ -153,10 +153,17 @@ impl Item for Flickable {
                     &geo,
                 );
 
-                (!inside_bounds_x, !inside_bounds_y, geo)
+                // Read after the position: getting it finishes a simulation that is over and removes its binding.
+                // The end of a simulation changes the result, so the handler runs again for a limit
+                // that changed while the simulation ran towards the old one.
+                let animating_x =
+                    Flickable::FIELD_OFFSETS.content_x().apply_pin(flick).has_binding();
+                let animating_y =
+                    Flickable::FIELD_OFFSETS.content_y().apply_pin(flick).has_binding();
+                (!inside_bounds_x, !inside_bounds_y, geo, animating_x, animating_y)
             },
             // Change event handler that puts the Flickable in bounds if it's not already
-            |self_weak, (x_out_of_bounds, y_out_of_bounds, geo)| {
+            |self_weak, (x_out_of_bounds, y_out_of_bounds, geo, _, _)| {
                 let Some(flick_rc) = self_weak.upgrade() else { return };
                 let Some(flick) = flick_rc.downcast::<Flickable>() else { return };
                 FlickableDataInner::move_within_limits(
@@ -959,6 +966,7 @@ impl FlickableDataInner {
                 x.set(p.x_length());
             } else if let Some(inner) = self_.as_deref_mut()
                 && inner.capture_events.is_none()
+                && inner.pressed_mouse_state.is_none()
             {
                 inner.start_spring_back(flick, flick_rc, Dimension::X, geo);
             }
@@ -970,6 +978,7 @@ impl FlickableDataInner {
                 y.set(p.y_length());
             } else if let Some(inner) = self_
                 && inner.capture_events.is_none()
+                && inner.pressed_mouse_state.is_none()
             {
                 inner.start_spring_back(flick, flick_rc, Dimension::Y, geo);
             }
