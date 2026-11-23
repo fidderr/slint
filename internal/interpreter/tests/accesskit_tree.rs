@@ -971,3 +971,18 @@ export component TestCase inherits Window {
         }
     }
 }
+"#;
+    let mut f = Fixture::with_source(source);
+    f.instance.invoke("open-popup", &[]).unwrap();
+    let full = f.tree.build_new_tree();
+    let (id, node) = node_by_label(&full, "Before");
+    let bounds = node.bounds().unwrap();
+    assert_eq!((bounds.x0, bounds.y0), (20., 120.));
+
+    f.instance.set_property("label", Value::String("After".into())).unwrap();
+    assert!(f.tree.has_dirty_nodes());
+    let partial = f.tree.rebuild_dirty_nodes();
+    let node = &partial.nodes.iter().find(|(n, _)| *n == id).expect("the node is rebuilt").1;
+    assert_eq!(node.label(), Some("After"));
+    assert_eq!(node.bounds(), Some(bounds));
+}
