@@ -238,18 +238,6 @@ impl i_slint_core::window::WindowAdapterInternal for AndroidWindowAdapter {
 }
 
 impl AndroidWindowAdapter {
-    /// Is an edit of the focused text input waiting to be sent to the input method?
-    pub(crate) fn has_pending_ime_update(&self) -> bool {
-        #[cfg(feature = "native-activity")]
-        {
-            self.pending_ime_update.borrow().is_some()
-        }
-        #[cfg(not(feature = "native-activity"))]
-        {
-            false
-        }
-    }
-
     fn cancel_menu_on_release(&self) {
         if self.show_menu_on_release.take() {
             self.java_helper

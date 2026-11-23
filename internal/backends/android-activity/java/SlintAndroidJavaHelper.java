@@ -205,9 +205,6 @@ class SlintInputView extends View {
     private boolean mRestartInputPending = false;
     // Whether a Slint text input is connected to the input method.
     private boolean mHasClient = false;
-    // The number of the last state that Slint sent and this view applied. A report to Slint carries it, so that
-    // Slint can tell a report that was made on an older state than the one it sent since.
-    int mAppliedSerial = 0;
 
     private InputHandle mCursorHandle;
     private InputHandle mLeftHandle;
@@ -562,12 +559,11 @@ class SlintInputView extends View {
             return;
         }
         if (mLastKnownSlintState != null && !mLastKnownSlintState.matches(editable)) {
-            boolean textEdited = !editable.toString().equals(mLastKnownSlintState.text);
             mLastKnownSlintState = new EditState(editable.toString(), editable.getSelectionStart(),
                     editable.getSelectionEnd(), editable.getComposingStart(), editable.getComposingEnd());
             SlintAndroidJavaHelper.updateText(mLastKnownSlintState.text, mLastKnownSlintState.selectionEnd,
                     mLastKnownSlintState.selectionStart, mLastKnownSlintState.composingStart,
-                    mLastKnownSlintState.composingEnd, mAppliedSerial, textEdited ? 1 : 0);
+                    mLastKnownSlintState.composingEnd);
         }
         if (mInputConnection != null && mInputConnection.mConnectionEditable == editable) {
             mInputConnection.didChangeEditingState();
@@ -1256,7 +1252,7 @@ public class SlintAndroidJavaHelper {
     }
 
     public static native void updateText(String text, int cursorPosition, int anchorPosition, int preeditStart,
-            int preeditEnd, int serial, int textEdited);
+            int preeditEnd);
 
     public static native void setNightMode(int nightMode);
 
@@ -1278,13 +1274,12 @@ public class SlintAndroidJavaHelper {
 
     public void set_imm_data(String text, int cursorPosition, int anchorPosition, int preeditStart, int preeditEnd,
             int curX, int curY, int anchorX, int anchorY, int cursorHeight, int inputType,
-            boolean showCursorHandles, boolean newClient, boolean updateEditingState, int serial) {
+            boolean showCursorHandles, boolean newClient, boolean updateEditingState) {
         mActivity.runOnUiThread(() -> {
             if (newClient) {
                 mInputView.setTextInputClient(inputType);
             }
             if (updateEditingState) {
-                mInputView.mAppliedSerial = serial;
                 // Android's selection start is the anchor, and its end is the cursor.
                 mInputView.setTextInputEditingState(
                         new SlintInputView.EditState(text, anchorPosition, cursorPosition, preeditStart, preeditEnd));
