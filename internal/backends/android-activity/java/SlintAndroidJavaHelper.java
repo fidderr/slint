@@ -1117,6 +1117,11 @@ public class SlintAndroidJavaHelper {
     }
 
     private void attachInputView() {
+        // NativeActivity sets STATE_UNSPECIFIED itself in onCreate, which wins over the manifest. With it, Android shows the keyboard by itself
+        // (SHOW_AUTO_EDITOR_FORWARD_NAV) whenever a new window of the app gets focus while this view, a text editor that holds the focus,
+        // is in it: Home, the ring screen, with no text field. STATE_HIDDEN takes it down for such windows; a field still shows it.
+        mActivity.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN
+                | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT);
         mActivity.addContentView(mInputView, params);
