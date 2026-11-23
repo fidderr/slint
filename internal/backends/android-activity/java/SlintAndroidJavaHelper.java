@@ -446,36 +446,6 @@ class SlintInputView extends View {
             return super.deleteSurroundingText(beforeLength, afterLength);
         }
 
-        // An input method may send Backspace and Delete as key events. Those would reach the text input through
-        // the input queue of the window, after the input method has put its next letter into this copy of the
-        // text, and the text input would then replace the copy and undo that letter. Edit the copy instead, as
-        // deleteSurroundingText does, and let the report to the text input carry the change.
-        @Override
-        public boolean sendKeyEvent(android.view.KeyEvent event) {
-            int code = event.getKeyCode();
-            if ((code != android.view.KeyEvent.KEYCODE_DEL && code != android.view.KeyEvent.KEYCODE_FORWARD_DEL)
-                    || event.getMetaState() != 0) {
-                return super.sendKeyEvent(event);
-            }
-            if (event.getAction() == android.view.KeyEvent.ACTION_DOWN
-                    && mConnectionEditable.getSelectionStart() != -1) {
-                beginBatchEdit();
-                int start = mConnectionEditable.getSelectionStart();
-                int end = mConnectionEditable.getSelectionEnd();
-                if (start == end) {
-                    if (code == android.view.KeyEvent.KEYCODE_DEL && start > 0) {
-                        start = Character.offsetByCodePoints(mConnectionEditable, start, -1);
-                    } else if (code == android.view.KeyEvent.KEYCODE_FORWARD_DEL
-                            && end < mConnectionEditable.length()) {
-                        end = Character.offsetByCodePoints(mConnectionEditable, end, 1);
-                    }
-                }
-                mConnectionEditable.delete(Math.min(start, end), Math.max(start, end));
-                endBatchEdit();
-            }
-            return true;
-        }
-
         @Override
         public boolean setComposingText(CharSequence text, int newCursorPosition) {
             boolean result;
