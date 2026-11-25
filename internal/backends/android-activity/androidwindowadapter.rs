@@ -31,7 +31,7 @@ struct LongPressDetection {
     position: LogicalPosition,
 }
 
-/// How long a failure to draw is waited out (see `surface_lost`).
+/// How long a failure to draw is waited out (see `surface_lost`): 2.5 times the longest gap to a new window seen (4 s).
 const SURFACE_LOST_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
 /// How often drawing is tried again while a failure is waited out.
 const SURFACE_RETRY_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
@@ -43,9 +43,11 @@ pub struct AndroidWindowAdapter {
     requested_graphics_api: RefCell<Option<i_slint_core::graphics::RequestedGraphicsAPI>>,
     pub(crate) event_queue: EventQueue,
     pub(crate) pending_redraw: Cell<bool>,
-    /// When drawing on the window's surface first failed, until a window or a redraw request from Android comes. Android 9 and
-    /// older take the surface of a stopped activity away without calling `onNativeWindowDestroyed` first: the activity that
-    /// comes back draws on a dead surface and gets a new window a moment later.
+    /// When drawing on the window's surface first failed, until a window or a redraw request from Android comes. Android takes the
+    /// surface of a stopped activity away without calling `onNativeWindowDestroyed` first (seen on Android 9, and on an Android 16
+    /// emulator on a loaded machine): the activity that comes back draws on a dead surface and gets a new window a moment later,
+    /// 0.4 to 1 s on a test machine, up to 4 s on a slow one. A failed draw that is no lost surface (the context is lost, memory
+    /// is out) takes the same path: the picture is held for up to `SURFACE_LOST_GRACE` and the loop then ends as before.
     surface_lost: Cell<Option<std::time::Instant>>,
     /// While a failure is waited out: when drawing is tried again. A redraw that is asked for before that is not lost, it
     /// is this one.
