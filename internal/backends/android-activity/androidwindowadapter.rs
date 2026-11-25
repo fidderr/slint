@@ -31,6 +31,9 @@ struct LongPressDetection {
     position: LogicalPosition,
 }
 
+/// How long a failure to draw is waited out (see `surface_lost`).
+const SURFACE_LOST_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+
 pub struct AndroidWindowAdapter {
     pub(crate) app: AndroidApp,
     pub(crate) window: Window,
@@ -38,6 +41,10 @@ pub struct AndroidWindowAdapter {
     requested_graphics_api: RefCell<Option<i_slint_core::graphics::RequestedGraphicsAPI>>,
     pub(crate) event_queue: EventQueue,
     pub(crate) pending_redraw: Cell<bool>,
+    /// When drawing on the window's surface first failed, until a window or a redraw request from Android comes. Android 9 and
+    /// older take the surface of a stopped activity away without calling `onNativeWindowDestroyed` first: the activity that
+    /// comes back draws on a dead surface and gets a new window a moment later.
+    surface_lost: Cell<Option<std::time::Instant>>,
     pub(super) java_helper: JavaHelper,
     #[cfg(feature = "accessibility")]
     pub(crate) accessibility: RefCell<Option<crate::accessibility::Accessibility>>,
@@ -281,6 +288,7 @@ impl AndroidWindowAdapter {
             requested_graphics_api: RefCell::new(None),
             event_queue: Default::default(),
             pending_redraw: Default::default(),
+            surface_lost: Default::default(),
             java_helper,
             #[cfg(feature = "accessibility")]
             accessibility: Default::default(),
@@ -359,6 +367,7 @@ impl AndroidWindowAdapter {
                         self.requested_graphics_api.borrow().clone(),
                         false,
                     )?;
+                    self.surface_lost.set(None);
                     self.resize()?;
                     self.request_redraw();
 
@@ -380,6 +389,7 @@ impl AndroidWindowAdapter {
             ) => self.resize()?,
             PollEvent::Main(MainEvent::RedrawNeeded { .. }) => {
                 self.pending_redraw.set(false);
+                self.surface_lost.set(None);
                 self.do_render()?;
             }
             PollEvent::Main(MainEvent::GainedFocus) => {
@@ -740,12 +750,24 @@ impl AndroidWindowAdapter {
 
     pub fn do_render(&self) -> Result<(), PlatformError> {
         if let Some(win) = self.app.native_window() {
+            if self.surface_lost.get().is_some_and(|since| since.elapsed() < SURFACE_LOST_GRACE) {
+                return Ok(());
+            }
             let o = self.offset.get();
-            let _ = self.renderer.render_transformed(
+            match self.renderer.render_transformed(
                 0.,
                 (o.x as f32, o.y as f32),
                 PhysicalSize { width: win.width() as _, height: win.height() as _ },
-            )?;
+            ) {
+                Ok(_) => self.surface_lost.set(None),
+                // The first failure is waited out: the next `InitWindow` or `RedrawNeeded` draws again. One that goes on
+                // for `SURFACE_LOST_GRACE` ends the event loop as it always did.
+                Err(e) if self.surface_lost.get().is_none() => {
+                    i_slint_core::debug_log!("Drawing failed, waiting for a new window: {e}");
+                    self.surface_lost.set(Some(std::time::Instant::now()));
+                }
+                Err(e) => return Err(e),
+            }
         }
         Ok(())
     }
