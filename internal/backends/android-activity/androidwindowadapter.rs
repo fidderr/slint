@@ -34,6 +34,19 @@ struct LongPressDetection {
 /// How long a failure to draw is waited out (see `surface_lost`).
 const SURFACE_LOST_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// PROOF ONLY: the first 3 draws fail, as a surface that is not there yet would.
+fn proof_wrap<T>(
+    f: impl FnOnce() -> Result<T, PlatformError>,
+) -> Result<T, PlatformError> {
+    static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    if N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 3 {
+        i_slint_core::debug_log!("PROOF forced draw failure");
+        Err(PlatformError::Other("PROOF forced draw failure".into()))
+    } else {
+        f()
+    }
+}
+
 pub struct AndroidWindowAdapter {
     pub(crate) app: AndroidApp,
     pub(crate) window: Window,
@@ -754,11 +767,11 @@ impl AndroidWindowAdapter {
                 return Ok(());
             }
             let o = self.offset.get();
-            match self.renderer.render_transformed(
+            match proof_wrap(|| self.renderer.render_transformed(
                 0.,
                 (o.x as f32, o.y as f32),
                 PhysicalSize { width: win.width() as _, height: win.height() as _ },
-            ) {
+            )) {
                 Ok(_) => self.surface_lost.set(None),
                 // The first failure is waited out: the next `InitWindow` or `RedrawNeeded` draws again. One that goes on
                 // for `SURFACE_LOST_GRACE` ends the event loop as it always did.
