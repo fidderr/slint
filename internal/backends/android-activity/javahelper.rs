@@ -750,7 +750,8 @@ impl JavaHelper {
     }
 
     /// Installs an AccessKit adapter on the view that covers the activity, unless there is one
-    /// already: `accesskit_android` panics on the UI thread when the view has a delegate.
+    /// already: `accesskit_android` panics on the UI thread when the view has a delegate. An adapter
+    /// that can not be made (its Java class does not load) is an error, not a panic.
     #[cfg(feature = "accessibility")]
     pub fn install_accessibility_adapter(
         &self,
@@ -768,12 +769,15 @@ impl JavaHelper {
             let mut env_021 = unsafe { jni_021::JNIEnv::from_raw(env.get_raw().cast()) }
                 .map_err(|_| jni::errors::Error::NullPtr("JNIEnv"))?;
             let view_021 = unsafe { jni_021::objects::JObject::from_raw(view.as_raw().cast()) };
-            Ok(Some(accesskit_android::InjectingAdapter::new(
+            // The fallible constructor: a build with `panic = "abort"` can not catch the panic of `new`.
+            accesskit_android::InjectingAdapter::try_new(
                 &mut env_021,
                 &view_021,
                 activation_handler,
                 action_handler,
-            )))
+            )
+            .map(Some)
+            .map_err(|e| jni::errors::Error::ParseFailed(format!("accesskit_android: {e}")))
         })
     }
 
