@@ -412,7 +412,7 @@ impl AndroidWindowAdapter {
                 self.do_render()?;
             }
             PollEvent::Main(MainEvent::Stop) => self.stopped.set(true),
-            PollEvent::Main(MainEvent::Start | MainEvent::Resume { .. }) => {
+            PollEvent::Main(MainEvent::Start | MainEvent::Resume) => {
                 self.stopped.set(false);
                 self.request_redraw();
             }
