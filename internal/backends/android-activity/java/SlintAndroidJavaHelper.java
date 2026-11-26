@@ -562,8 +562,10 @@ class SlintInputView extends View {
 
     public SlintInputView(Context context) {
         super(context);
-        setFocusable(true);
-        setFocusableInTouchMode(true);
+        // Out of the focus order until a text input wants the keyboard: a focused text editor makes Android show
+        // the keyboard by itself when a window of the app gets focus, and without touch mode (a D-pad, a hardware
+        // keyboard, Android TV) the view gets the focus without a touch.
+        setFocusable(false);
         mEditable = new SlintEditable();
         mMagnifierSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && context instanceof NativeActivity;
     }
@@ -571,6 +573,11 @@ class SlintInputView extends View {
     @Override
     public boolean onCheckIsTextEditor() {
         return true;
+    }
+
+    void setKeyboardWanted(boolean wanted) {
+        setFocusable(wanted);
+        setFocusableInTouchMode(wanted);
     }
 
     @Override
@@ -1264,6 +1271,7 @@ public class SlintAndroidJavaHelper {
 
     public void show_keyboard() {
         mActivity.runOnUiThread(() -> {
+            mInputView.setKeyboardWanted(true);
             mInputView.requestFocus();
             mActivity.getSystemService(InputMethodManager.class).showSoftInput(mInputView, 0);
         });
@@ -1273,6 +1281,7 @@ public class SlintAndroidJavaHelper {
         mActivity.runOnUiThread(() -> {
             mActivity.getSystemService(InputMethodManager.class)
                     .hideSoftInputFromWindow(mInputView.getWindowToken(), 0);
+            mInputView.setKeyboardWanted(false);
             mInputView.clearFocus();
             mInputView.hideCursor();
         });
