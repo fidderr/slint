@@ -43,7 +43,6 @@ pub struct AndroidWindowAdapter {
     requested_graphics_api: RefCell<Option<i_slint_core::graphics::RequestedGraphicsAPI>>,
     pub(crate) event_queue: EventQueue,
     pub(crate) pending_redraw: Cell<bool>,
-    stopped: Cell<bool>,
     /// When drawing on the window's surface first failed, until a window or a redraw request from Android comes. Android takes the
     /// surface of a stopped activity away without calling `onNativeWindowDestroyed` first (seen on Android 9, and on an Android 16
     /// emulator on a loaded machine): the activity that comes back draws on a dead surface and gets a new window a moment later,
@@ -296,7 +295,6 @@ impl AndroidWindowAdapter {
             requested_graphics_api: RefCell::new(None),
             event_queue: Default::default(),
             pending_redraw: Default::default(),
-            stopped: Default::default(),
             surface_lost: Default::default(),
             redraw_retry: Default::default(),
             java_helper,
@@ -410,11 +408,6 @@ impl AndroidWindowAdapter {
                 self.surface_lost.set(None);
                 self.redraw_retry.set(None);
                 self.do_render()?;
-            }
-            PollEvent::Main(MainEvent::Stop) => self.stopped.set(true),
-            PollEvent::Main(MainEvent::Start | MainEvent::Resume) => {
-                self.stopped.set(false);
-                self.request_redraw();
             }
             PollEvent::Main(MainEvent::GainedFocus) => {
                 self.java_helper
@@ -785,9 +778,6 @@ impl AndroidWindowAdapter {
     }
 
     pub fn do_render(&self) -> Result<(), PlatformError> {
-        if self.stopped.get() {
-            return Ok(());
-        }
         let Some(win) = self.app.native_window() else {
             self.surface_lost.set(None);
             self.redraw_retry.set(None);
