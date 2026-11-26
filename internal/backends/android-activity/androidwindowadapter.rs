@@ -32,9 +32,7 @@ struct LongPressDetection {
 }
 
 /// How long a failure to draw is waited out (see `surface_lost`).
-const SURFACE_LOST_GRACE: std::time::Duration = std::time::Duration::from_secs(10);
-/// How often drawing is tried again while a failure is waited out.
-const SURFACE_RETRY_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
+const SURFACE_LOST_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub struct AndroidWindowAdapter {
     pub(crate) app: AndroidApp,
@@ -47,9 +45,6 @@ pub struct AndroidWindowAdapter {
     /// older take the surface of a stopped activity away without calling `onNativeWindowDestroyed` first: the activity that
     /// comes back draws on a dead surface and gets a new window a moment later.
     surface_lost: Cell<Option<std::time::Instant>>,
-    /// While a failure is waited out: when drawing is tried again. A redraw that is asked for before that is not lost, it
-    /// is this one.
-    redraw_retry: Cell<Option<std::time::Instant>>,
     pub(super) java_helper: JavaHelper,
     #[cfg(feature = "accessibility")]
     pub(crate) accessibility: RefCell<Option<crate::accessibility::Accessibility>>,
@@ -294,7 +289,6 @@ impl AndroidWindowAdapter {
             event_queue: Default::default(),
             pending_redraw: Default::default(),
             surface_lost: Default::default(),
-            redraw_retry: Default::default(),
             java_helper,
             #[cfg(feature = "accessibility")]
             accessibility: Default::default(),
@@ -373,13 +367,7 @@ impl AndroidWindowAdapter {
                         self.requested_graphics_api.borrow().clone(),
                         false,
                     )?;
-                    if let Some(since) = self.surface_lost.take() {
-                        i_slint_core::debug_log!(
-                            "A new window came {} ms after drawing failed",
-                            since.elapsed().as_millis()
-                        );
-                    }
-                    self.redraw_retry.set(None);
+                    self.surface_lost.set(None);
                     self.resize()?;
                     self.request_redraw();
 
@@ -395,8 +383,6 @@ impl AndroidWindowAdapter {
                 // The window, and with it the context that a rendering notifier's resources belong
                 // to, is only valid until this callback returns.
                 self.renderer.suspend()?;
-                // Nothing to draw on until the next window.
-                self.redraw_retry.set(None);
             }
             PollEvent::Main(
                 MainEvent::WindowResized { .. } | MainEvent::ContentRectChanged { .. },
@@ -404,7 +390,6 @@ impl AndroidWindowAdapter {
             PollEvent::Main(MainEvent::RedrawNeeded { .. }) => {
                 self.pending_redraw.set(false);
                 self.surface_lost.set(None);
-                self.redraw_retry.set(None);
                 self.do_render()?;
             }
             PollEvent::Main(MainEvent::GainedFocus) => {
@@ -763,57 +748,26 @@ impl AndroidWindowAdapter {
         Ok(())
     }
 
-    /// How long until drawing is tried again after a failure that is waited out, `None` when nothing waits.
-    pub(crate) fn redraw_retry_in(&self) -> Option<std::time::Duration> {
-        self.redraw_retry.get().map(|due| due.saturating_duration_since(std::time::Instant::now()))
-    }
-
-    /// Asks for the redraw that was held back, once its time is there.
-    pub(crate) fn redraw_retry_if_due(&self) {
-        if self.redraw_retry.get().is_some_and(|due| due <= std::time::Instant::now()) {
-            self.pending_redraw.set(true);
-        }
-    }
-
     pub fn do_render(&self) -> Result<(), PlatformError> {
-        let Some(win) = self.app.native_window() else {
-            self.surface_lost.set(None);
-            self.redraw_retry.set(None);
-            return Ok(());
-        };
-        let now = std::time::Instant::now();
-        let waiting = self
-            .surface_lost
-            .get()
-            .is_some_and(|since| now.saturating_duration_since(since) < SURFACE_LOST_GRACE);
-        // A redraw asked for while a failure is waited out is the retry that is scheduled, not a new try.
-        if waiting && self.redraw_retry.get().is_some_and(|due| now < due) {
-            return Ok(());
-        }
-        let o = self.offset.get();
-        match self.renderer.render_transformed(
-            0.,
-            (o.x as f32, o.y as f32),
-            PhysicalSize { width: win.width() as _, height: win.height() as _ },
-        ) {
-            Ok(_) => {
-                self.surface_lost.set(None);
-                self.redraw_retry.set(None);
+        if let Some(win) = self.app.native_window() {
+            if self.surface_lost.get().is_some_and(|since| since.elapsed() < SURFACE_LOST_GRACE) {
+                return Ok(());
             }
-            // A failure is waited out and drawn again at a few tries a second: a new window (`InitWindow`) or `RedrawNeeded`
-            // ends the wait, and a window that was only late gets its frame without any input. One that goes on for
-            // `SURFACE_LOST_GRACE` ends the event loop as it always did.
-            Err(e) => match self.surface_lost.get() {
-                None => {
+            let o = self.offset.get();
+            match self.renderer.render_transformed(
+                0.,
+                (o.x as f32, o.y as f32),
+                PhysicalSize { width: win.width() as _, height: win.height() as _ },
+            ) {
+                Ok(_) => self.surface_lost.set(None),
+                // The first failure is waited out: the next `InitWindow` or `RedrawNeeded` draws again. One that goes on
+                // for `SURFACE_LOST_GRACE` ends the event loop as it always did.
+                Err(e) if self.surface_lost.get().is_none() => {
                     i_slint_core::debug_log!("Drawing failed, waiting for a new window: {e}");
-                    self.surface_lost.set(Some(now));
-                    self.redraw_retry.set(Some(now + SURFACE_RETRY_EVERY));
+                    self.surface_lost.set(Some(std::time::Instant::now()));
                 }
-                Some(since) if now.saturating_duration_since(since) < SURFACE_LOST_GRACE => {
-                    self.redraw_retry.set(Some(now + SURFACE_RETRY_EVERY));
-                }
-                Some(_) => return Err(e),
-            },
+                Err(e) => return Err(e),
+            }
         }
         Ok(())
     }

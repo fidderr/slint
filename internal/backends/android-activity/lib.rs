@@ -157,9 +157,6 @@ impl i_slint_core::platform::Platform for AndroidPlatform {
             // poll would otherwise wait here for an unrelated wakeup.
             if self.window.pending_redraw.get() {
                 timeout = Some(Duration::ZERO);
-            } else if let Some(wait) = self.window.redraw_retry_in() {
-                // A failure to draw is waited out and tried again (see `AndroidWindowAdapter::do_render`).
-                timeout = Some(timeout.map_or(wait, |t| t.min(wait)));
             }
             let mut r = Ok(ControlFlow::Continue(()));
             self.app.poll_events(timeout, |e| {
@@ -172,7 +169,6 @@ impl i_slint_core::platform::Platform for AndroidPlatform {
             if r?.is_break() {
                 break;
             }
-            self.window.redraw_retry_if_due();
             if self.window.pending_redraw.take() {
                 self.window.do_render()?;
             }

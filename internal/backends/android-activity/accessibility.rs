@@ -47,8 +47,7 @@ impl Accessibility {
         window_adapter_weak: Weak<AndroidWindowAdapter>,
         java_helper: &JavaHelper,
     ) -> Result<Self, String> {
-        // A Java class that does not load comes back as an error. The catch is for the panics of the calls after it, in
-        // a build that unwinds (a build with `panic = "abort"` has no such catch).
+        // accesskit_android panics when it cannot load its Java class or create its delegate
         let adapter = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             java_helper.install_accessibility_adapter(Activation, Actions)
         }))
