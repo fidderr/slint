@@ -179,29 +179,6 @@ fn new_tree_describes_the_item_tree() {
     assert!(!volume.supports_action(Action::Click));
 }
 
-fn root_label(source: &str) -> Option<String> {
-    let mut f = Fixture::with_source(source);
-    let update = f.tree.build_new_tree();
-    let root = update.tree.as_ref().unwrap().root;
-    let (_, node) = update.nodes.iter().find(|(id, _)| *id == root).unwrap();
-    node.label().map(str::to_string)
-}
-
-#[test]
-fn the_root_node_is_named_after_the_default_title() {
-    // What a backend that doesn't know the program by name, like Android's, says
-    i_slint_core::window::set_default_window_title("My Application".into());
-    let untitled = "export component TestCase inherits Window { width: 100px; height: 100px; }";
-    assert_eq!(root_label(untitled).as_deref(), Some("My Application"));
-}
-
-#[test]
-fn an_explicit_title_names_the_root_node() {
-    i_slint_core::window::set_default_window_title("My Application".into());
-    let titled = r#"export component TestCase inherits Window { title: "Mine"; width: 100px; height: 100px; }"#;
-    assert_eq!(root_label(titled).as_deref(), Some("Mine"));
-}
-
 const POPUP_SOURCE: &str = r#"
 export component TestCase inherits Window {
     width: 400px;

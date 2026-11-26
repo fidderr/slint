@@ -64,10 +64,6 @@ bind_java_type! {
             name = "font_scale",
             sig = () -> jfloat,
         },
-        fn application_label {
-            name = "application_label",
-            sig = () -> JString,
-        },
         fn get_clipboard {
             name = "get_clipboard",
             sig = () -> JString,
@@ -837,11 +833,6 @@ impl JavaHelper {
             let text = JString::new(env, text)?;
             helper.set_clipboard(env, &text)
         })
-    }
-
-    /// The name of the application, as its manifest labels it.
-    pub fn application_label(&self) -> Result<String, jni::errors::Error> {
-        self.with_jni_env(|env, helper| Ok(helper.application_label(env)?.to_string()))
     }
 
     pub fn get_clipboard(&self) -> Result<Option<String>, jni::errors::Error> {

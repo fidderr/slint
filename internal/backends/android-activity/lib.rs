@@ -213,11 +213,6 @@ impl i_slint_core::platform::Platform for AndroidPlatform {
             .unwrap_or_else(|e| javahelper::print_jni_error(&self.app, e));
         self.window.java_helper.set_system_colors(&ctx, night_mode);
         self.window.java_helper.set_motion_preference(&ctx);
-        // Windows without a title are named after the program, which is `app_process64` here.
-        match self.window.java_helper.application_label() {
-            Ok(label) => i_slint_core::window::set_default_window_title(label.into()),
-            Err(e) => i_slint_core::debug_log!("Could not get the application label: {e:#?}"),
-        }
         if let Ok(scale) = self.window.java_helper.font_scale()
             && let Some(size) = javahelper::font_scale_to_logical_length(scale)
         {
